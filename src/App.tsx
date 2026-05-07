@@ -24,7 +24,10 @@ import {
   RefreshCcw,
   ExternalLink,
   Globe,
-  LogOut
+  LogOut,
+  Mail,
+  Key,
+  LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -38,7 +41,16 @@ import {
   orderBy,
   getDocFromServer
 } from 'firebase/firestore';
-import { auth, db, loginWithGoogle, logout, OperationType, handleFirestoreError } from './lib/firebase';
+import { 
+  auth, 
+  db, 
+  loginWithGoogle, 
+  logout, 
+  OperationType, 
+  handleFirestoreError,
+  loginWithEmail,
+  registerWithEmail 
+} from './lib/firebase';
 
 // --- Types ---
 
@@ -127,7 +139,7 @@ const STORAGE_KEYS = {
 
 // --- Sub-components (Moved outside to prevent re-renders resetting state) ---
 
-const Sidebar = ({ currentView, setCurrentView, isMobileMenuOpen, setIsMobileMenuOpen, currentUser }: any) => {
+const Sidebar = ({ currentView, setCurrentView, isMobileMenuOpen, setIsMobileMenuOpen }: any) => {
   const navItems = [
     { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
     { id: 'events', label: 'Événements', icon: Calendar },
@@ -179,16 +191,9 @@ const Sidebar = ({ currentView, setCurrentView, isMobileMenuOpen, setIsMobileMen
         <div className="p-5 mt-auto border-t border-[#1F2937]">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <p className="text-[12px] text-muted-text">Connecté en tant que</p>
-              <p className="text-[11px] font-bold text-white truncate max-w-[180px]">{currentUser?.email || 'Organisateur'}</p>
+              <p className="text-[12px] text-muted-text">Système synchronisé</p>
+              <p className="text-[11px] font-bold text-brand-primary uppercase tracking-widest">Temps Réel Cloud</p>
             </div>
-            <button 
-              onClick={logout}
-              className="flex items-center gap-2 text-[11px] font-bold text-slate-500 hover:text-red-400 transition-colors uppercase tracking-widest"
-            >
-              <LogOut className="w-3 h-3" />
-              Déconnexion
-            </button>
           </div>
         </div>
       </div>
@@ -1431,66 +1436,7 @@ const EventManagerView = ({ activeEvent, updateEvent, venues, globalStaff }: any
 
 // --- Main App Component ---
 
-const LoginView = ({ authError, setAuthError }: { authError: string | null, setAuthError: (err: string | null) => void }) => (
-  <div className="min-h-screen bg-dark-bg flex items-center justify-center p-4">
-    <div className="card-neon max-w-sm w-full text-center space-y-8 py-12">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-brand-primary to-brand-secondary flex items-center justify-center shadow-2xl shadow-brand-primary/20 text-3xl">
-          🪩
-        </div>
-        <div className="flex flex-col">
-          <span className="text-white text-xs font-black tracking-[0.3em] uppercase opacity-50">STARLIGHT</span>
-          <span className="text-brand-primary text-xl font-bold tracking-[0.1em] uppercase">SOCIETY</span>
-        </div>
-      </div>
-      
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold text-white">Gestionnaire de Collectif</h2>
-        <p className="text-muted-text text-sm px-4">Connectez-vous pour synchroniser vos événements en temps réel sur tous vos appareils.</p>
-      </div>
-
-      {authError && (
-        <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex gap-3 text-left animate-pulse">
-          <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
-          <p className="text-red-200 text-xs font-semibold leading-relaxed">{authError}</p>
-        </div>
-      )}
-
-      <button 
-        onClick={async () => {
-          setAuthError(null);
-          try {
-            await loginWithGoogle();
-          } catch (err: any) {
-            setAuthError(err.message || 'Une erreur est survenue lors de la connexion.');
-            console.error(err);
-          }
-        }}
-        className="w-full flex items-center justify-center gap-3 bg-white text-black font-black uppercase tracking-widest py-4 rounded-xl hover:bg-brand-primary hover:text-white transition-all transform hover:scale-[1.02]"
-      >
-        <Globe className="w-5 h-5" />
-        Se connecter
-      </button>
-
-      {authError?.includes('popup') && (
-        <div className="pt-2">
-          <p className="text-[10px] text-brand-primary font-bold animate-pulse">
-            💡 ASTUCE : Si ça ne s'ouvre pas, cliquez sur "Ouvrir dans un nouvel onglet" en haut à droite !
-          </p>
-        </div>
-      )}
-
-      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Accès restreint aux organisateurs</p>
-    </div>
-  </div>
-);
-
 export default function App() {
-  // --- Auth State ---
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-
   // --- State ---
   const [isLoaded, setIsLoaded] = useState(false);
   const [currentView, setCurrentView] = useState<View>('dashboard');
@@ -1502,35 +1448,8 @@ export default function App() {
   
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
-  // --- Initialization ---
+  // --- Synchronization via Firestore (Public) ---
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        const allowedEmailsStr = import.meta.env.VITE_ALLOWED_EMAILS || '';
-        const allowedEmails = allowedEmailsStr.split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
-        
-        // If the list is empty, we allow everyone (default behavior for setup)
-        // But if there ARE emails, we restrict.
-        if (allowedEmails.length > 0 && !allowedEmails.includes(user.email?.toLowerCase() || '')) {
-          setAuthError(`L'adresse ${user.email} n'est pas autorisée. Veuillez contacter l'administrateur.`);
-          logout();
-          setCurrentUser(null);
-        } else {
-          setCurrentUser(user);
-          setAuthError(null);
-        }
-      } else {
-        setCurrentUser(null);
-      }
-      setAuthChecked(true);
-    });
-
-    return () => unsubAuth();
-  }, []);
-
-  useEffect(() => {
-    if (!currentUser) return;
-
     const unsubVenues = onSnapshot(collection(db, 'venues'), 
       (snapshot) => {
         const data = snapshot.docs.map(doc => doc.data() as Venue);
@@ -1561,7 +1480,7 @@ export default function App() {
       unsubStaff();
       unsubEvents();
     };
-  }, [currentUser]);
+  }, []);
 
   // --- Computed Stats ---
   const stats = useMemo(() => {
@@ -1729,25 +1648,11 @@ export default function App() {
     }
   };
 
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen bg-dark-bg flex items-center justify-center">
-        <div className="animate-spin text-brand-primary">
-          <RefreshCcw className="w-8 h-8" />
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentUser) {
-    return <LoginView authError={authError} setAuthError={setAuthError} />;
-  }
-
   if (!isLoaded) return (
     <div className="min-h-screen bg-[#0f0f12] flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-slate-500 font-medium tracking-widest animate-pulse">CHARGEMENT DU SYSTÈME</p>
+        <p className="text-slate-500 font-medium tracking-widest animate-pulse uppercase">Synchronisation Cloud...</p>
       </div>
     </div>
   );
@@ -1759,7 +1664,6 @@ export default function App() {
         setCurrentView={setCurrentView} 
         isMobileMenuOpen={isMobileMenuOpen} 
         setIsMobileMenuOpen={setIsMobileMenuOpen} 
-        currentUser={currentUser}
       />
       
       <main className="lg:ml-[220px] p-4 md:p-8 lg:p-6 transition-all duration-300">

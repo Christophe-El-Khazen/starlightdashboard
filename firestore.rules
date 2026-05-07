@@ -7,10 +7,6 @@ service cloud.firestore {
     }
 
     // --- Helpers ---
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -25,51 +21,17 @@ service cloud.firestore {
 
     // --- Venues ---
     match /venues/{venueId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(venueId) && isValidVenue(incoming());
-      allow update: if isSignedIn() && isValidVenue(incoming()) && (
-        incoming().id == existing().id // Immutable ID
-      );
-      allow delete: if isSignedIn();
-    }
-
-    function isValidVenue(data) {
-      return data.keys().hasAll(['id', 'name', 'address', 'capacity']) &&
-             data.id is string && data.id.size() <= 128 &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
-             data.address is string && data.address.size() > 0 && data.address.size() <= 500 &&
-             data.capacity is number;
+      allow read, write: if true;
     }
 
     // --- Staff ---
     match /staff/{staffId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(staffId) && isValidStaff(incoming());
-      allow update: if isSignedIn() && isValidStaff(incoming()) && (
-        incoming().id == existing().id // Immutable ID
-      );
-      allow delete: if isSignedIn();
-    }
-
-    function isValidStaff(data) {
-      return data.keys().hasAll(['id', 'firstName', 'defaultRole', 'phone']) &&
-             data.id is string && data.id.size() <= 128 &&
-             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() <= 100 &&
-             data.defaultRole is string &&
-             data.phone is string;
+      allow read, write: if true;
     }
 
     // --- Events ---
     match /events/{eventId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(eventId) && isValidEvent(incoming());
-      allow update: if isSignedIn() && isValidEvent(incoming()) && (
-        incoming().id == existing().id // Immutable ID
-      ) && (
-        // Action: Generic update
-        incoming().diff(existing()).affectedKeys().hasAny(['title', 'date', 'venueId', 'maxCapacity', 'ticketsSold', 'shotgunTickets', 'ticketPrice', 'ticketTiers', 'promoCodes', 'lineup', 'staff', 'timeline', 'customId'])
-      );
-      allow delete: if isSignedIn();
+      allow read, write: if true;
     }
 
     function isValidEvent(data) {
