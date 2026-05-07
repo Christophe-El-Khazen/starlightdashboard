@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "Venue": {
+      "title": "Venue",
+      "description": "A place where events happen",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "capacity": { "type": "number" }
+      },
+      "required": ["id", "name", "address", "capacity"]
+    },
+    "StaffMember": {
+      "title": "Staff Member",
+      "description": "A person working for the collective",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "defaultRole": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["id", "firstName", "defaultRole", "phone"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "A specific event/party",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "venueId": { "type": "string" },
+        "maxCapacity": { "type": "number" },
+        "ticketsSold": { "type": "number" },
+        "shotgunTickets": { "type": "number" },
+        "ticketPrice": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "date", "venueId"]
+    }
+  },
+  "firestore": {
+    "venues": {
+      "schema": "#/entities/Venue",
+      "description": "Collection of venues"
+    },
+    "staff": {
+      "schema": "#/entities/StaffMember",
+      "description": "Collection of staff members"
+    },
+    "events": {
+      "schema": "#/entities/Event",
+      "description": "Collection of events"
+    }
+  }
+}

@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Venues ---
+    match /venues/{venueId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(venueId) && isValidVenue(incoming());
+      allow update: if isSignedIn() && isValidVenue(incoming()) && (
+        incoming().id == existing().id // Immutable ID
+      );
+      allow delete: if isSignedIn();
+    }
+
+    function isValidVenue(data) {
+      return data.keys().hasAll(['id', 'name', 'address', 'capacity']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.address is string && data.address.size() > 0 && data.address.size() <= 500 &&
+             data.capacity is number;
+    }
+
+    // --- Staff ---
+    match /staff/{staffId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(staffId) && isValidStaff(incoming());
+      allow update: if isSignedIn() && isValidStaff(incoming()) && (
+        incoming().id == existing().id // Immutable ID
+      );
+      allow delete: if isSignedIn();
+    }
+
+    function isValidStaff(data) {
+      return data.keys().hasAll(['id', 'firstName', 'defaultRole', 'phone']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() <= 100 &&
+             data.defaultRole is string &&
+             data.phone is string;
+    }
+
+    // --- Events ---
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(eventId) && isValidEvent(incoming());
+      allow update: if isSignedIn() && isValidEvent(incoming()) && (
+        incoming().id == existing().id // Immutable ID
+      ) && (
+        // Action: Generic update
+        incoming().diff(existing()).affectedKeys().hasAny(['title', 'date', 'venueId', 'maxCapacity', 'ticketsSold', 'shotgunTickets', 'ticketPrice', 'ticketTiers', 'promoCodes', 'lineup', 'staff', 'timeline', 'customId'])
+      );
+      allow delete: if isSignedIn();
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['id', 'title', 'date', 'venueId']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+             data.date is string &&
+             data.venueId is string;
+    }
+  }
+}

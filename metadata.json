@@ -1,0 +1,6 @@
+{
+  "name": "Event Manager POC",
+  "description": "Système complet de gestion d'événements, lieux et staff avec pointage en temps réel et stockage local.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
