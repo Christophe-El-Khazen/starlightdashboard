@@ -20,88 +20,113 @@ async function startServer() {
   // API Route: Proxy Shotgun Events
   app.get("/api/shotgun/events", async (req, res) => {
     const apiKey = process.env.SHOTGUN_API_KEY;
-    const organizerId = process.env.SHOTGUN_ORGANIZER_ID;
+    const defaultOrganizerId = process.env.SHOTGUN_ORGANIZER_ID;
+    const requestedId = req.query.organizerId as string;
+    
+    const organizerId = requestedId || defaultOrganizerId;
 
-    if (!apiKey || !organizerId) {
+    console.log(`[Shotgun Proxy] Request received. OrganizerID: ${organizerId || 'NONE'}, Has API Key: ${!!apiKey}`);
+
+    if (!apiKey) {
       return res.status(400).json({ 
         error: "Configuration Shotgun manquante",
-        details: "Assurez-vous d'avoir configuré SHOTGUN_API_KEY et SHOTGUN_ORGANIZER_ID dans les Secrets." 
+        details: "Assurez-vous d'avoir configuré SHOTGUN_API_KEY dans les Secrets de l'application." 
       });
     }
 
     try {
-      // Trying variations of the Shotgun API endpoint and hosts
       const hosts = [
-        "api.shotgun.live", 
-        "public-api.shotgun.live",
         "partner-api.shotgun.live",
-        "partner.shotgun.live",
-        "public.shotgun.live"
+        "api.shotgun.live", 
+        "public-api.shotgun.live"
       ];
-      const paths = [
-        (host: string, id: string) => `https://${host}/v2/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/partner/v1/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/v1/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/v2/venues/${id}/events`,
-        (host: string, id: string) => `https://${host}/v2/events?organizer_id=${id}`,
-        (host: string, id: string) => `https://${host}/v2/events?filter[organizer_id]=${id}`,
-        (host: string, id: string) => `https://${host}/v2/events?filter[venue_id]=${id}`,
-        (host: string, id: string) => `https://${host}/api/v2/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/api/v2/venues/${id}/events`,
-        (host: string, id: string) => `https://${host}/api/partner/v1/organizers/${id}/events`,
-        (host: string, id: string) => `https://${host}/api/v1/organizers/${id}/events`
+      
+      const variations: string[] = [];
+
+      // If we have an ID, try ID-based endpoints first
+      if (organizerId) {
+        const idPaths = [
+          (host: string, id: string) => `https://${host}/v2/organizers/${id}/events`,
+          (host: string, id: string) => `https://${host}/v2/organisers/${id}/events`,
+          (host: string, id: string) => `https://${host}/v2/events?organizer_id=${id}`,
+          (host: string, id: string) => `https://${host}/v2/events?organiser_id=${id}`,
+          (host: string, id: string) => `https://${host}/partner/v1/organizers/${id}/events`,
+          (host: string, id: string) => `https://${host}/partner/v1/organisers/${id}/events`,
+          (host: string, id: string) => `https://${host}/v1/organizers/${id}/events`,
+          (host: string, id: string) => `https://${host}/v1/organisers/${id}/events`,
+          (host: string, id: string) => `https://${host}/v2/venues/${id}/events`
+        ];
+
+        hosts.forEach(host => {
+          idPaths.forEach(pathFn => variations.push(pathFn(host, organizerId)));
+        });
+      }
+
+      // Always try ID-less endpoints (they might use the token context)
+      const generalPaths = [
+        (host: string) => `https://${host}/v2/events`,
+        (host: string) => `https://${host}/partner/v1/events`,
+        (host: string) => `https://${host}/v1/events`
       ];
 
-      const variations: string[] = [];
       hosts.forEach(host => {
-        paths.forEach(pathFn => variations.push(pathFn(host, organizerId)));
+        generalPaths.forEach(pathFn => variations.push(pathFn(host)));
       });
 
       const errors: any[] = [];
+      
       for (const url of variations) {
-        console.log(`Calling Shotgun API: ${url}`);
-        const response = await fetch(url, {
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "X-Shotgun-Api-Key": apiKey,
-            "Accept": "application/json"
+        try {
+          console.log(`[Shotgun Proxy] Trying URL: ${url}`);
+          const headers: Record<string, string> = {
+            "Accept": "application/json",
+            "User-Agent": "Starlight-Dashboard/1.0"
+          };
+
+          // Try different auth headers
+          headers["Authorization"] = `Bearer ${apiKey}`;
+          headers["X-Partner-Token"] = apiKey; // Common in Partner APIs
+          headers["X-Shotgun-Api-Key"] = apiKey;
+          headers["X-Api-Key"] = apiKey;
+
+          const response = await fetch(url, { headers });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log(`[Shotgun Proxy] Success with URL: ${url}`);
+            return res.json(data);
           }
-        });
 
-        if (response.ok) {
-          const data = await response.json();
-          return res.json(data);
-        }
+          const status = response.status;
+          let details = "Error";
+          try {
+            const text = await response.text();
+            details = text.slice(0, 500); 
+          } catch (e) {
+            details = "Could not read error body";
+          }
 
-        const contentType = response.headers.get("content-type") || "";
-        let errorBody = "No body";
-        if (contentType.includes("application/json")) {
-          errorBody = await response.text();
-        } else {
-          errorBody = `Non-JSON response (Status: ${response.status})`;
-        }
+          console.warn(`[Shotgun Proxy] Failed URL ${url}: ${status} - ${details}`);
+          errors.push({ url, status, details });
 
-        errors.push({
-          status: response.status,
-          url: url,
-          data: errorBody
-        });
-        
-        if (response.status === 401 || response.status === 403) {
-          break;
+          if (status === 401 || status === 403) {
+            // If auth fails on the partner-api host with a specific token, it's likely the key is wrong.
+          }
+        } catch (fetchErr: any) {
+          console.error(`[Shotgun Proxy] Fetch error for ${url}:`, fetchErr.message);
+          errors.push({ url, status: "FETCH_ERROR", details: fetchErr.message });
         }
       }
 
-      console.error("Shotgun API Errors:", errors);
-      return res.status(errors[errors.length - 1]?.status || 500).json({ 
-        error: "Impossible de contacter l'API Shotgun",
-        details: "Toutes les variations d'URL ont échoué.",
-        errors: errors
+      return res.status(502).json({ 
+        error: "Échec de la synchronisation Shotgun",
+        details: "L'API Shotgun a refusé toutes les tentatives de connexion. Vérifiez que votre API KEY est bien un 'Partner Token' et que votre ID est correct.",
+        debug: errors.map(e => ({ url: e.url, status: e.status, details: e.details }))
       });
+
     } catch (error: any) {
-      console.error("Server Error:", error);
-      res.status(500).json({ error: "Erreur serveur interne", details: error.message });
+      console.error("[Shotgun Proxy] Global Error:", error);
+      res.status(500).json({ error: "Erreur interne du proxy", details: error.message });
     }
   });
 
